@@ -1,12 +1,18 @@
 package main
 
 import (
-	"strings"
-	"fmt"
-	"time"
-	"os"
 	"bufio"
+	"fmt"
+	"github.com/sirupsen/logrus"
 	"io"
+	"net/url"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/influxdata/influxdb/client/v2"
 )
 
 type Reader interface {
@@ -14,108 +20,191 @@ type Reader interface {
 }
 
 type Writer interface {
-	Write(wc chan string)
-}
-
-type LogProcess struct {
-	// 从读取模块向解析模块传输数据
-	rc chan string
-	// 从解析模块向写入模块传输数据
-	wc chan string
-	reader Reader
-	writer Writer
-
+	Write(wc chan Message)
 }
 
 type ReadFromFile struct {
-	// 日志文件路径
-	path string
+	path string // 待读取的文件路径
 }
 
 type WriteToInfluxDB struct {
-	// influxDB 数据源信息
-	influxDBDsn string
+	influxDBDns string
 }
 
-/**
-	写入模块，负责将数据写入到 InfluxDB 中
- */
-func (w *WriteToInfluxDB) Write(wc chan string) {
+type LogProcess struct {
+	rc     chan string
+	wc     chan Message
+	reader Reader
+	writer Writer
+}
+
+type Message struct {
+	TimeLocal    time.Time
+	BytesSend    int
+	Path         string
+	Method       string
+	Scheme       string
+	Status       string
+	UpstreamTime float64
+	RequestTime  float64
+}
+
+func (r *ReadFromFile) Read(rc chan string) {
+	// 读取文件
+	f, err := os.Open(r.path)
+	if err != nil {
+		panic(fmt.Sprintf("open file error: %s", err.Error()))
+	}
+
+	// 从文件末尾开始逐行读取文件内容
+	f.Seek(0, 2)
+	readBuffer := bufio.NewReader(f)
+
+	for {
+		line, err := readBuffer.ReadBytes('\n')
+		if err == io.EOF {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		} else if err != nil {
+			panic(fmt.Sprintf("ReadBytes error: %s", err.Error()))
+		}
+		rc <- string(line[:len(line)-1])
+	}
+
+}
+
+func (w *WriteToInfluxDB) Write(wc chan Message) {
+	// 解析模块
+
+	// Create a new HTTPClient
+	c, err := client.NewHTTPClient(client.HTTPConfig{
+		Addr:     "http://localhost:8086",
+		Username: username,
+		Password: password,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer c.Close()
+
+	// Create a new point batch
+	bp, err := client.NewBatchPoints(client.BatchPointsConfig{
+		Database:  MyDB,
+		Precision: "s",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create a point and add to batch
+	tags := map[string]string{"cpu": "cpu-total"}
+	fields := map[string]interface{}{
+		"idle":   10.1,
+		"system": 53.3,
+		"user":   46.6,
+	}
+
+	pt, err := client.NewPoint("cpu_usage", tags, fields, time.Now())
+	if err != nil {
+		log.Fatal(err)
+	}
+	bp.AddPoint(pt)
+
+	// Write the batch
+	if err := c.Write(bp); err != nil {
+		log.Fatal(err)
+	}
 
 	for v := range wc {
 		fmt.Println(v)
 	}
-}
-
-
-/**
-	读取模块，负责从文件中读取日志记录
- */
-func (r *ReadFromFile) Read(rc chan string) {
-	/**
-		此处使用指针的原因：
-		1、如果结构体很大的话，使用指针则不用复制，在性能上会有很大的优势。
-		2、使用指针可以直接修改结构体参数的值，而不是修改某一个结构体实例的参数值
-   */
-   // 打开文件
-   f, err := os.Open(r.path)
-   if err != nil {
-   		panic(fmt.Sprintf("open file error: %s", err.Error()))
-   }
-
-   // 从文件末尾开始逐行读取文件内容
-   f.Seek(0, 2)
-   readBuffer := bufio.NewReader(f)
-
-   for {
-	   // 读取文件直到遇到 \n
-	   line, err := readBuffer.ReadBytes('\n')
-	   if err == io.EOF {//读取文件到结尾时处理
-	   		time.Sleep(500 * time.Millisecond)
-	   		continue
-	   } else if err != nil {
-	   		panic(fmt.Sprintf("ReadBytes error: %s", err.Error()))
-	   }
-
-	   rc <- string(line[:len(line)-1])
-   }
-
-
 
 }
 
-/**
-	解析模块，负责解析读到的数据
- */
 func (lp *LogProcess) Process() {
-	// 循环读取 rc 中的内容
-	for v := range lp.rc {
-		lp.wc <- strings.ToUpper(v)
-	}
-}
+	// 解析模块
 
+	/**
+
+	127.0.0.1 - - [04/Mar/2018:13:49:52 +0000] http "GET /foo?query=t HTTP/1.0" 200 2133 "-" "KeepAliveClient" "-" 1.005 1.854
+
+
+
+	正则表达式：
+	([\d\.]+)\s+([^ \[]+)\s+([^ \[]+)\s+\[([^\]]+)\]\s+([a-z]+)\s+\"([^"]+)\"\s+(\d{3})\s+(\d+)\s+\"([^"]+)\"\s+\"(.*?)\"\s+\"([\d\.-]+)\"\s+([\d\.-]+)\s+([\d\.-]+)
+
+	*/
+	// expr := '([\d\.]+)\s+([^ \[]+)\s+([^ \[]+)\s+\[([^\]]+)\]\s+([a-z]+)\s+\"([^"]+)\"\s+(\d{3})\s+(\d+)\s+\"([^"]+)\"\s+\"(.*?)\"\s+\"([\d\.-]+)\"\s+([\d\.-]+)\s+([\d\.-]+)'
+	expr := ""
+
+	r := regexp.MustCompile(expr)
+	// 获取时区
+	location, _ := time.LoadLocation("Asia/Shanghai")
+
+	for v := range lp.rc {
+		result := r.FindStringSubmatch(v)
+		if len(result) != 14 {
+			logrus.Infoln("FindStringSubmatch fail: %s", v)
+			continue
+		}
+
+		message := &Message{}
+		t, err := time.ParseInLocation("/02/Jan/2006:15:04:05 +0000", result[4], location)
+		if err != nil {
+			logrus.Println("ParseInLocation fail:", err.Error(), result[4])
+		}
+		message.TimeLocal = t
+
+		message.BytesSend, _ = strconv.Atoi(result[8])
+		// GET /foo?query=t HTTP/1.0
+		requestLine := strings.Split(result[6], " ")
+		if len(requestLine) != 3 {
+			logrus.Println("strings.Split fail", result[6])
+			continue
+		}
+
+		message.Method = requestLine[0]
+
+		u, err := url.Parse(requestLine[1])
+		if err != nil {
+			logrus.Println("URL parse fail:", err)
+			continue
+		}
+
+		message.Path = u.Path
+
+		message.Scheme = result[5]
+
+		message.Status = result[7]
+
+		message.UpstreamTime, _ = strconv.ParseFloat(result[12], 64)
+		message.RequestTime, _ = strconv.ParseFloat(result[13], 64)
+
+		lp.wc <- message
+	}
+
+}
 
 func main() {
-	r := &ReadFromFile{
-		path: "./access.log",
+
+	reader := &ReadFromFile{
+		path: "src/access.log",
 	}
 
-	w := &WriteToInfluxDB{
-		influxDBDsn: "",
+	writer := &WriteToInfluxDB{
+		influxDBDns: "",
 	}
 
-
-	// 初始化 LogProcess 实例
 	lp := &LogProcess{
-		rc: make(chan string),
-		wc: make(chan string),
-		reader: r,
-		writer: w,
+		rc:     make(chan string),
+		wc:     make(chan Message),
+		reader: reader,
+		writer: writer,
 	}
 
 	go lp.reader.Read(lp.rc)
 	go lp.Process()
 	go lp.writer.Write(lp.wc)
 
-	time.Sleep(30)
+	time.Sleep(30 * time.Second)
 }
