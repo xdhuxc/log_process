@@ -70,8 +70,10 @@ func main() {
 			if err != nil {
 				logrus.Infoln("WriteToFile error: ", err)
 			}
+			fmt.Println("Write to access.log successfully!")
+			time.Sleep(time.Second)
 		}
 
 	}
-	time.Sleep(time.Millisecond * 200)
+	time.Sleep(time.Millisecond * 2000)
 }

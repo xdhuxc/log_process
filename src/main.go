@@ -216,12 +216,10 @@ func (lp *LogProcess) Process() {
 
 
 	正则表达式：
+
 	([\d\.]+)\s+([^ \[]+)\s+([^ \[]+)\s+\[([^\]]+)\]\s+([a-z]+)\s+\"([^"]+)\"\s+(\d{3})\s+(\d+)\s+\"([^"]+)\"\s+\"(.*?)\"\s+\"([\d\.-]+)\"\s+([\d\.-]+)\s+([\d\.-]+)
-
 	*/
-	// expr := '([\d\.]+)\s+([^ \[]+)\s+([^ \[]+)\s+\[([^\]]+)\]\s+([a-z]+)\s+\"([^"]+)\"\s+(\d{3})\s+(\d+)\s+\"([^"]+)\"\s+\"(.*?)\"\s+\"([\d\.-]+)\"\s+([\d\.-]+)\s+([\d\.-]+)'
-	expr := ""
-
+	expr := `([\d\.]+)\s+([^ \[]+)\s+([^ \[]+)\s+\[([^\]]+)\]\s+([a-z]+)\s+\"([^"]+)\"\s+(\d{3})\s+(\d+)\s+\"([^"]+)\"\s+\"(.*?)\"\s+\"([\d\.-]+)\"\s+([\d\.-]+)\s+([\d\.-]+)`
 	r := regexp.MustCompile(expr)
 	// 获取时区
 	location, _ := time.LoadLocation("Asia/Shanghai")
@@ -235,7 +233,7 @@ func (lp *LogProcess) Process() {
 		}
 
 		message := &Message{}
-		t, err := time.ParseInLocation("/02/Jan/2006:15:04:05 +0000", result[4], location)
+		t, err := time.ParseInLocation("02/Jan/2006:15:04:05 +0000", result[4], location)
 		if err != nil {
 			TypeMonitorChan <- TypeErrNum
 			logrus.Println("ParseInLocation fail:", err.Error(), result[4])
@@ -279,7 +277,7 @@ func main() {
 
 	var path, influxDsn string
 
-	flag.StringVar(&path, "path", "src/sccess.log", "read file path")
+	flag.StringVar(&path, "path", "src/access.log", "read file path")
 	flag.StringVar(&influxDsn, "influxDBDns", "http://127.0.0.1:8086@imooc@imoocpassword@imooc@s", "influxdb data source")
 
 	// 解析参数
