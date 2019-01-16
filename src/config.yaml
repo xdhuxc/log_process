@@ -1,0 +1,7 @@
+Prometheus:
+
+InfluxDB:
+  Addr: 127.0.0.1:8086
+  Username: xdhuxc
+  Password: Xdhuxc123
+  :s
