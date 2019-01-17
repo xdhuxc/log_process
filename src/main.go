@@ -6,7 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v2"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -103,13 +105,11 @@ func (w *WtireToPrometheus) Write(wc chan *Message) {
 func (w *WriteToInfluxDB) Write(wc chan *Message) {
 	// 解析模块
 
-	params := strings.Split(w.influxDBDns, "@")
-
 	// Create a new HTTPClient
 	c, err := client.NewHTTPClient(client.HTTPConfig{
-		Addr:     params[0],
-		Username: params[1],
-		Password: params[2],
+		Addr:     w.InfluxDB.Address,
+		Username: w.InfluxDB.Username,
+		Password: w.InfluxDB.Password,
 	})
 	if err != nil {
 		logrus.Fatal(err)
@@ -120,8 +120,8 @@ func (w *WriteToInfluxDB) Write(wc chan *Message) {
 		fmt.Println(v)
 		// Create a new point batch
 		bp, err := client.NewBatchPoints(client.BatchPointsConfig{
-			Database:  params[3],
-			Precision: params[4],
+			Database:  w.InfluxDB.Database,
+			Precision: w.InfluxDB.Precision,
 		})
 		if err != nil {
 			logrus.Fatal(err)
@@ -227,12 +227,24 @@ func (lp *LogProcess) Process() {
 
 }
 
+var conf Configuration
+
+func init() {
+	bytes, err := ioutil.ReadFile("config.yaml")
+	if err != nil {
+		logrus.Fatalf("Read file error: %s", err.Error())
+	}
+	err = yaml.Unmarshal(bytes, &conf)
+	if err != nil {
+		logrus.Fatalf("yaml Unmarshal error: %s", err.Error())
+	}
+}
+
 func main() {
 
-	var path, influxDsn string
+	var path string
 
 	flag.StringVar(&path, "path", "src/access.log", "read file path")
-	flag.StringVar(&influxDsn, "influxDBDns", "http://127.0.0.1:8086@xdhuxc@Xdhuxc123@xdb@s", "influxdb data source")
 
 	// 解析参数
 	flag.Parse()
@@ -242,7 +254,7 @@ func main() {
 	}
 
 	writer := &WriteToInfluxDB{
-		influxDBDns: influxDsn,
+		InfluxDB: conf.InfluxDB,
 	}
 
 	lp := &LogProcess{

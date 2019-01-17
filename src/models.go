@@ -15,7 +15,7 @@ type ReadFromFile struct {
 }
 
 type WriteToInfluxDB struct {
-	influxDBDns string
+	InfluxDB InfluxDB
 }
 
 type WtireToPrometheus struct {
@@ -53,4 +53,16 @@ type Monitor struct {
 	startTime time.Time
 	data      SystemInfo
 	tpsSlice  []int
+}
+
+type Configuration struct {
+	InfluxDB InfluxDB `yaml: "influxdb"`
+}
+
+type InfluxDB struct {
+	Address   string `yaml:"address"`
+	Username  string `yaml:"username"`
+	Password  string `yaml:"password"`
+	Database  string `yaml:"database"`
+	Precision string `yaml:"precision"`
 }
